@@ -1,34 +1,41 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Corners, MediaKind, VisualMode } from '../model';
+import type { MediaKind, Surface } from '../model';
 import { homographyFromQuad, inverse3x3, toGlMatrix } from '../math/homography';
 
 type Props = {
-  corners: Corners;
-  mode: VisualMode;
-  opacity: number;
+  surfaces: Surface[];
   mediaUrl: string | null;
   mediaKind: MediaKind;
   muted: boolean;
   className?: string;
+  playbackKey?: number;
 };
 
 const VERTEX = `
 attribute vec2 aPosition;
-void main() {
-  gl_Position = vec4(aPosition, 0.0, 1.0);
-}
+void main() { gl_Position = vec4(aPosition, 0.0, 1.0); }
 `;
-
+const MAX_SURFACES = 6;
+const shaderUniforms = Array.from({ length: MAX_SURFACES }, (_, i) => `
+uniform mat3 uInverse${i};
+uniform int uMode${i};
+uniform float uOpacity${i};
+uniform int uMask${i};
+uniform float uFeather${i};`).join('\n');
+const renderLayers = Array.from({ length: MAX_SURFACES }, (_, i) => `
+if (uCount > ${i}) {
+  vec4 next${i} = sampleLayer(dest, uInverse${i}, uMode${i},
+    uOpacity${i}, uMask${i}, uFeather${i});
+  color = mix(color, next${i}.rgb, next${i}.a);
+}`).join('\n');
 const FRAGMENT = `
 precision highp float;
 uniform vec2 uResolution;
-uniform mat3 uInverse;
 uniform float uTime;
-uniform float uOpacity;
-uniform int uMode;
+uniform int uCount;
 uniform sampler2D uMedia;
-
-float line(float x, float n, float thickness) {
+${shaderUniforms}
+float gridline(float x, float n, float thickness) {
   return 1.0 - smoothstep(0.0, thickness, abs(fract(x * n) - 0.5));
 }
 vec3 demo(vec2 uv) {
@@ -39,20 +46,17 @@ vec3 demo(vec2 uv) {
   float rings = pow(0.5 + 0.5 * sin(r * 64.0 - uTime * 3.2), 9.0);
   float teeth = pow(0.5 + 0.5 * cos(spin + uTime * 0.7), 15.0);
   float bubbles = pow(0.5 + 0.5 * sin(r * 39.0 + cos(a * 9.0 + uTime) * 2.0), 12.0);
-  vec3 base = vec3(0.01, 0.035, 0.085);
   vec3 cyan = vec3(0.08, 0.83, 1.0);
-  vec3 violet = vec3(0.55, 0.27, 1.0);
-  vec3 gold = vec3(1.0, 0.65, 0.21);
-  float halo = 0.12 / (r + 0.06);
-  vec3 color = base + cyan * rings * 0.75 + violet * teeth * rings +
-    gold * bubbles * 0.22 + cyan * halo * 0.14;
-  color += cyan * 0.12 * pow(0.5 + 0.5 * cos(a * 6.0 + uTime), 24.0);
-  return color;
+  return vec3(0.01, 0.035, 0.085) + cyan * rings * 0.75
+    + vec3(0.55, 0.27, 1.0) * teeth * rings
+    + vec3(1.0, 0.65, 0.21) * bubbles * 0.22
+    + cyan * (0.12 / (r + 0.06)) * 0.14
+    + cyan * 0.12 * pow(0.5 + 0.5 * cos(a * 6.0 + uTime), 24.0);
 }
 vec3 calibration(vec2 uv) {
   float edge = float(uv.x < 0.006 || uv.x > 0.994 || uv.y < 0.006 || uv.y > 0.994);
-  float gx = line(uv.x, 10.0, 0.016);
-  float gy = line(uv.y, 10.0, 0.016);
+  float gx = gridline(uv.x, 10.0, 0.016);
+  float gy = gridline(uv.y, 10.0, 0.016);
   float mid = float(abs(uv.x - 0.5) < 0.002 || abs(uv.y - 0.5) < 0.002);
   float cross = float(length(uv - vec2(0.5)) < 0.012);
   return mix(vec3(0.014, 0.035, 0.07), vec3(0.05, 0.52, 0.73), max(gx, gy) * 0.7)
@@ -67,91 +71,106 @@ vec3 checker(vec2 uv) {
   return mix(vec3(0.045, 0.08, 0.17), vec3(0.59, 0.85, 0.94), c)
     + vec3(0.23, 0.7, 1.0) * mark * 0.25;
 }
-void main() {
-  // WebGL gl_FragCoord is bottom-up; stage coordinates are top-down.
-  vec2 dest = vec2(gl_FragCoord.x / uResolution.x, 1.0 - gl_FragCoord.y / uResolution.y);
-  vec3 mapped = uInverse * vec3(dest, 1.0);
-  if (abs(mapped.z) < 0.000001) { gl_FragColor = vec4(0.0,0.0,0.0,1.0); return; }
+vec4 sampleLayer(vec2 dest, mat3 inverseH, int mode, float opacity, int mask, float feather) {
+  if (opacity <= 0.001) return vec4(0.0);
+  vec3 mapped = inverseH * vec3(dest, 1.0);
+  if (abs(mapped.z) < 0.000001) return vec4(0.0);
   vec2 uv = mapped.xy / mapped.z;
-  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec4(0.0);
+  float alpha = opacity;
+  if (mask == 1) {
+    float radius = length((uv - 0.5) * 2.0);
+    if (radius > 1.0) return vec4(0.0);
+    if (feather > 0.0001)
+      alpha *= 1.0 - smoothstep(1.0 - feather * 2.0, 1.0, radius);
+  } else if (feather > 0.0001) {
+    float d = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    alpha *= smoothstep(0.0, feather, d);
   }
-  vec3 color;
-  if (uMode == 3) {
-    // Image upload is unflipped: source top row is sampled at v=0.
-    color = texture2D(uMedia, uv).rgb;
-  } else if (uMode == 1) {
-    color = calibration(uv);
-  } else if (uMode == 2) {
-    color = checker(uv);
-  } else {
-    color = demo(uv);
-  }
-  gl_FragColor = vec4(clamp(color * uOpacity, 0.0, 1.0), 1.0);
+  vec3 c;
+  if (mode == 3) c = texture2D(uMedia, uv).rgb;
+  else if (mode == 1) c = calibration(uv);
+  else if (mode == 2) c = checker(uv);
+  else c = demo(uv);
+  return vec4(clamp(c, 0.0, 1.0), alpha);
+}
+void main() {
+  vec2 dest = vec2(gl_FragCoord.x / uResolution.x, 1.0 - gl_FragCoord.y / uResolution.y);
+  vec3 color = vec3(0.0);
+  ${renderLayers}
+  gl_FragColor = vec4(color, 1.0);
 }
 `;
 
-function shader(gl: WebGLRenderingContext, kind: number, source: string): WebGLShader {
-  const s = gl.createShader(kind);
-  if (!s) throw new Error('Unable to allocate shader.');
-  gl.shaderSource(s, source);
-  gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-    throw new Error(gl.getShaderInfoLog(s) || 'Shader compilation failed.');
+function compile(gl: WebGLRenderingContext, kind: number, source: string): WebGLShader {
+  const shader = gl.createShader(kind);
+  if (!shader) throw new Error('Could not allocate WebGL shader.');
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(shader) || 'Compilation failed';
+    gl.deleteShader(shader);
+    throw new Error(log);
   }
-  return s;
+  return shader;
 }
 
+type SurfaceUniforms = {
+  inverse: WebGLUniformLocation | null;
+  mode: WebGLUniformLocation | null;
+  opacity: WebGLUniformLocation | null;
+  mask: WebGLUniformLocation | null;
+  feather: WebGLUniformLocation | null;
+};
+
 export default function WarpCanvas({
-  corners, mode, opacity, mediaUrl, mediaKind, muted, className,
+  surfaces, mediaUrl, mediaKind, muted, className,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const inputRef = useRef({ corners, mode, opacity, muted });
+  const propsRef = useRef({ surfaces, muted });
+  const lastInverseRef = useRef<Map<string, Float32Array>>(new Map());
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { inputRef.current = { corners, mode, opacity, muted }; },
-    [corners, mode, opacity, muted]);
+
+  useEffect(() => { propsRef.current = { surfaces, muted }; }, [surfaces, muted]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const gl = canvas.getContext('webgl', { alpha: false, antialias: true });
+    const gl = canvas.getContext('webgl', { alpha: false, antialias: false });
     if (!gl) {
-      setError('WebGL is unavailable. Enable hardware acceleration or use a supported browser.');
+      setError('WebGL unavailable. Try a modern browser with GPU acceleration.');
       return;
     }
-    let frame = 0;
     let disposed = false;
-    let video: HTMLVideoElement | null = null;
-    let img: HTMLImageElement | null = null;
+    let frame = 0;
     let ready = false;
-    let uploadedImage = false;
-    let lastValidInverse = toGlMatrix([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+    let imageUploaded = false;
+    let image: HTMLImageElement | null = null;
+    let video: HTMLVideoElement | null = null;
+    let vs: WebGLShader | null = null;
+    let fs: WebGLShader | null = null;
     let program: WebGLProgram | null = null;
     let buffer: WebGLBuffer | null = null;
     let texture: WebGLTexture | null = null;
-    let vs: WebGLShader | null = null;
-    let fs: WebGLShader | null = null;
-
     try {
-      vs = shader(gl, gl.VERTEX_SHADER, VERTEX);
-      fs = shader(gl, gl.FRAGMENT_SHADER, FRAGMENT);
+      vs = compile(gl, gl.VERTEX_SHADER, VERTEX);
+      fs = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT);
       program = gl.createProgram();
-      if (!program) throw new Error('Unable to create WebGL program.');
+      if (!program) throw new Error('Could not create WebGL program.');
       gl.attachShader(program, vs);
       gl.attachShader(program, fs);
       gl.linkProgram(program);
       if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        throw new Error(gl.getProgramInfoLog(program) || 'Shader linking failed.');
+        throw new Error(gl.getProgramInfoLog(program) || 'WebGL linking failed.');
       }
       gl.useProgram(program);
       buffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-        -1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1,
-      ]), gl.STATIC_DRAW);
-      const position = gl.getAttribLocation(program, 'aPosition');
-      gl.enableVertexAttribArray(position);
-      gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+      gl.bufferData(gl.ARRAY_BUFFER,
+        new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+      const aPosition = gl.getAttribLocation(program, 'aPosition');
+      gl.enableVertexAttribArray(aPosition);
+      gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 0, 0);
       texture = gl.createTexture();
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -159,51 +178,50 @@ export default function WarpCanvas({
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0,
-        gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA,
+        gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
       gl.uniform1i(gl.getUniformLocation(program, 'uMedia'), 0);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
 
       if (mediaUrl && mediaKind === 'image') {
-        img = new Image();
-        img.onload = () => { if (!disposed) ready = true; };
-        img.onerror = () => { if (!disposed) setError('Could not decode the image.'); };
-        img.src = mediaUrl;
+        image = new Image();
+        image.onload = () => { if (!disposed) ready = true; };
+        image.onerror = () => { if (!disposed) setError('Image could not be decoded.'); };
+        image.src = mediaUrl;
       } else if (mediaUrl && mediaKind === 'video') {
         video = document.createElement('video');
         video.src = mediaUrl;
         video.loop = true;
         video.playsInline = true;
-        video.muted = inputRef.current.muted;
+        video.muted = true;
         video.preload = 'auto';
         video.onloadeddata = () => { if (!disposed) ready = true; };
-        video.onerror = () => { if (!disposed) setError('Could not decode the video.'); };
-        video.play().catch(() => { /* User may need to interact to start playback. */ });
+        video.onerror = () => { if (!disposed) setError('Video could not be decoded.'); };
+        video.play().catch(() => {
+          if (!disposed) setError('Autoplay blocked. Click within the page to allow video playback.');
+        });
       }
 
-      const uniforms = {
-        res: gl.getUniformLocation(program, 'uResolution'),
-        inv: gl.getUniformLocation(program, 'uInverse'),
-        time: gl.getUniformLocation(program, 'uTime'),
-        opacity: gl.getUniformLocation(program, 'uOpacity'),
-        mode: gl.getUniformLocation(program, 'uMode'),
-      };
+      const uniform = (name: string) => gl.getUniformLocation(program, name);
+      const res = uniform('uResolution'), time = uniform('uTime'), count = uniform('uCount');
+      const layerUniforms: SurfaceUniforms[] = Array.from({ length: MAX_SURFACES }, (_, i) => ({
+        inverse: uniform('uInverse' + i), mode: uniform('uMode' + i),
+        opacity: uniform('uOpacity' + i), mask: uniform('uMask' + i),
+        feather: uniform('uFeather' + i),
+      }));
       const started = performance.now();
+      const identity = toGlMatrix([1,0,0, 0,1,0, 0,0,1]);
+
       const draw = () => {
         if (disposed) return;
-        const { corners: current, mode: visual, opacity: op, muted: isMuted } = inputRef.current;
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const { surfaces: current, muted: isMuted } = propsRef.current;
+        const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
         const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
         const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
         if (canvas.width !== w || canvas.height !== h) {
           canvas.width = w; canvas.height = h;
         }
         gl.viewport(0, 0, w, h);
-        try {
-          lastValidInverse = toGlMatrix(inverse3x3(homographyFromQuad(current)));
-        } catch {
-          // Preserve previous valid alignment during an invalid drag.
-        }
         if (video) {
           video.muted = isMuted;
           if (ready && video.readyState >= 2) {
@@ -211,24 +229,38 @@ export default function WarpCanvas({
             try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video); }
             catch { ready = false; }
           }
-        } else if (img && ready && !uploadedImage) {
+        } else if (image && ready && !imageUploaded) {
           gl.bindTexture(gl.TEXTURE_2D, texture);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-          uploadedImage = true;
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+          imageUploaded = true;
         }
-        gl.uniform2f(uniforms.res, w, h);
-        gl.uniformMatrix3fv(uniforms.inv, false, lastValidInverse);
-        gl.uniform1f(uniforms.time, (performance.now() - started) / 1000);
-        gl.uniform1f(uniforms.opacity, op);
-        gl.uniform1i(uniforms.mode, visual === 'media' && ready ? 3 :
-          visual === 'grid' ? 1 : visual === 'checker' ? 2 : 0);
+        const layers = current.filter(s => s.visible).slice(0, MAX_SURFACES);
+        gl.uniform1i(count, layers.length);
+        gl.uniform2f(res, w, h);
+        gl.uniform1f(time, (performance.now() - started) / 1000);
+        layers.forEach((layer, i) => {
+          const u = layerUniforms[i];
+          let inverse = lastInverseRef.current.get(layer.id) || identity;
+          try {
+            inverse = toGlMatrix(inverse3x3(homographyFromQuad(layer.corners)));
+            lastInverseRef.current.set(layer.id, inverse);
+          } catch {
+            // Keep the last valid transform for an in-progress invalid drag.
+          }
+          gl.uniformMatrix3fv(u.inverse, false, inverse);
+          gl.uniform1i(u.mode, layer.mode === 'grid' ? 1 : layer.mode === 'checker' ? 2 :
+            layer.mode === 'media' && ready ? 3 : 0);
+          gl.uniform1f(u.opacity, layer.opacity);
+          gl.uniform1i(u.mask, layer.mask === 'ellipse' ? 1 : 0);
+          gl.uniform1f(u.feather, layer.feather);
+        });
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         frame = requestAnimationFrame(draw);
       };
       setError(null);
       frame = requestAnimationFrame(draw);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unknown WebGL error.');
+      setError(cause instanceof Error ? cause.message : 'Unexpected WebGL error.');
     }
     return () => {
       disposed = true;
@@ -238,7 +270,7 @@ export default function WarpCanvas({
         video.removeAttribute('src');
         video.load();
       }
-      if (img) img.onload = img.onerror = null;
+      if (image) image.onload = image.onerror = null;
       gl.deleteTexture(texture);
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
@@ -247,10 +279,9 @@ export default function WarpCanvas({
     };
   }, [mediaUrl, mediaKind]);
 
-  return (
-    <>
-      <canvas ref={canvasRef} className={className || 'warp-canvas'} aria-label="Projection mapped output" />
-      {error && <div className="canvas-error" role="alert">{error}</div>}
-    </>
-  );
+  return <>
+    <canvas ref={canvasRef} className={className || 'warp-canvas'}
+      aria-label="Composite projection mapped output" />
+    {error && <div className="canvas-error" role="alert">{error}</div>}
+  </>;
 }
