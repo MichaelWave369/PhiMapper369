@@ -202,7 +202,7 @@ export default function WarpCanvas({
         });
       }
 
-      const uniform = (name: string) => gl.getUniformLocation(program, name);
+      const uniform = (name: string) => gl.getUniformLocation(program!, name);
       const res = uniform('uResolution'), time = uniform('uTime'), count = uniform('uCount');
       const layerUniforms: SurfaceUniforms[] = Array.from({ length: MAX_SURFACES }, (_, i) => ({
         inverse: uniform('uInverse' + i), mode: uniform('uMode' + i),
