@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent, PointerEvent } from 'react';
 import WarpCanvas from './render/WarpCanvas';
+import { useLivePulse } from './audio/useLivePulse';
 import type { Corners, MediaKind, Point, Project, Surface, VisualMode } from './model';
 import {
-  cloneProject, constrain, defaultProject, downloadProject, MAX_SURFACES,
+  cloneProject, constrain, cueScene, CUES, defaultProject, downloadProject, MAX_SURFACES, SCENES,
   newSurface, parseProject, patchSurface, readStoredProject,
   reorderSurface, saveStoredProject, selectedSurface,
 } from './model';
 
 const PROJECTOR = new URLSearchParams(window.location.search).has('projector');
-const CHANNEL = 'phimapper369-r2-live';
+const CHANNEL = 'phimapper369-r3-live';
 const PRESETS = [
   { name: 'Full HD 1920 × 1080', width: 1920, height: 1080 },
   { name: 'HD 1280 × 720', width: 1280, height: 720 },
@@ -17,15 +18,17 @@ const PRESETS = [
   { name: '4K 3840 × 2160', width: 3840, height: 2160 },
 ];
 const MODES: { key: VisualMode; label: string; description: string }[] = [
-  { key: 'demo', label: 'Φ Engine', description: 'Living geometry' },
+  { key: 'demo', label: 'Living Geometry', description: 'Scene selector below' },
   { key: 'grid', label: 'Calibration', description: 'Grid + crosshairs' },
   { key: 'checker', label: 'Checker', description: 'Contrast pattern' },
   { key: 'media', label: 'My media', description: 'Local photo or video' },
 ];
 const NAMES = ['TOP LEFT', 'TOP RIGHT', 'BOTTOM RIGHT', 'BOTTOM LEFT'];
-type SyncMessage = { type: 'SYNC'; project: Project; mediaUrl: string | null; mediaKind: MediaKind };
+type SyncMessage = { type: 'SYNC'; project: Project; mediaUrl: string | null; mediaKind: MediaKind;
+  blackout: boolean; audioLevel: number };
+type LevelMessage = { type: 'LEVEL'; audioLevel: number };
 type RequestMessage = { type: 'REQUEST' };
-type ChannelMessage = SyncMessage | RequestMessage;
+type ChannelMessage = SyncMessage | RequestMessage | LevelMessage;
 type History = { past: Project[]; future: Project[] };
 const HISTORY_LIMIT = 80;
 
@@ -73,12 +76,15 @@ export default function App() {
   const [mediaKind, setMediaKind] = useState<MediaKind>(null);
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [showReference, setShowReference] = useState(true);
-  const [status, setStatus] = useState('Surface Composer ready.');
+  const [status, setStatus] = useState('Living Geometry ready.');
+  const [blackout, setBlackout] = useState(false);
+  const [projectorAudio, setProjectorAudio] = useState(0);
+  const audio = useLivePulse();
   const stageRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
   const mediaOwnedRef = useRef<string | null>(null);
   const referenceOwnedRef = useRef<string | null>(null);
-  const snapshotRef = useRef({ project, mediaUrl, mediaKind });
+  const snapshotRef = useRef({ project, mediaUrl, mediaKind, blackout, audioLevel: audio.level });
 
   function remember() {
     const h = history.current;
@@ -129,12 +135,19 @@ export default function App() {
   }
 
   useEffect(() => {
-    snapshotRef.current = { project, mediaUrl, mediaKind };
+    snapshotRef.current = { project, mediaUrl, mediaKind, blackout, audioLevel: audio.level };
     if (!PROJECTOR) {
       saveStoredProject(project);
-      channelRef.current?.postMessage({ type:'SYNC', project, mediaUrl, mediaKind } satisfies SyncMessage);
+      channelRef.current?.postMessage({ type:'SYNC', project, mediaUrl, mediaKind,
+        blackout, audioLevel: audio.level } satisfies SyncMessage);
     }
-  }, [project, mediaUrl, mediaKind]);
+  }, [project, mediaUrl, mediaKind, blackout]);
+
+  useEffect(() => {
+    if (PROJECTOR) return;
+    snapshotRef.current.audioLevel = audio.level;
+    channelRef.current?.postMessage({ type: 'LEVEL', audioLevel: audio.level } satisfies LevelMessage);
+  }, [audio.level]);
 
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
@@ -150,7 +163,14 @@ export default function App() {
           setProject(parsed);
           setMediaUrl(typeof msg.mediaUrl === 'string' ? msg.mediaUrl : null);
           setMediaKind(msg.mediaKind === 'image' || msg.mediaKind === 'video' ? msg.mediaKind : null);
+          setBlackout(msg.blackout === true);
+          setProjectorAudio(typeof msg.audioLevel === 'number' && Number.isFinite(msg.audioLevel)
+            ? constrain(msg.audioLevel, 0, 1) : 0);
         } catch { /* Reject malformed channel updates. */ }
+      }
+      if (PROJECTOR && msg.type === 'LEVEL' &&
+        typeof msg.audioLevel === 'number' && Number.isFinite(msg.audioLevel)) {
+        setProjectorAudio(constrain(msg.audioLevel, 0, 1));
       }
       if (!PROJECTOR && msg.type === 'REQUEST') {
         channel.postMessage({ type: 'SYNC', ...snapshotRef.current } satisfies SyncMessage);
@@ -303,7 +323,8 @@ export default function App() {
   if (PROJECTOR) return (
     <div className="projector-root">
       <WarpCanvas className="projector-canvas" surfaces={project.surfaces}
-        mediaUrl={mediaUrl} mediaKind={mediaKind} muted={true} />
+        mediaUrl={mediaUrl} mediaKind={mediaKind} muted={true}
+        audioLevel={projectorAudio} blackout={blackout} />
       <div className="projector-toolbar">
         <span>ΦMapper · {project.surfaces.length} surfaces · {project.width} × {project.height}</span>
         <button onClick={() => {
@@ -329,7 +350,7 @@ export default function App() {
           <div><strong>PhiMapper<span>369</span></strong><small>SPATIAL PROJECTION STUDIO</small></div>
         </div>
         <div className="header-right">
-          <span className="release">R2 · SURFACE COMPOSER</span>
+          <span className="release">R3 · LIVING GEOMETRY</span>
           <a className="header-link" href="https://github.com/MichaelWave369/PhiMapper369"
             target="_blank" rel="noreferrer">GitHub ↗</a>
         </div>
@@ -337,9 +358,9 @@ export default function App() {
       <div className="workspace">
         <aside className="sidebar" aria-label="Mapping controls">
           <div className="sidebar-heading">
-            <div className="eyebrow">PHIMAPPER / R2</div>
-            <h1>Surface Composer</h1>
-            <p>Layer multiple physical projections in one space.</p>
+            <div className="eyebrow">PHIMAPPER / R3</div>
+            <h1>Living Geometry</h1>
+            <p>Map, animate, and perform with spatial light.</p>
           </div>
           <section className="panel">
             <div className="panel-title"><span className="step">01</span> PROJECT</div>
@@ -374,7 +395,7 @@ export default function App() {
                     onClick={() => apply({ ...projectRef.current, selectedId:s.id }, false)}>
                     <span className="surface-indicator">{s.visible ? '◈' : '◌'}</span>
                     <span className="surface-copy"><strong>{s.name}</strong>
-                      <small>{MODES.find(m => m.key === s.mode)?.label} · {s.mask}</small>
+                      <small>{s.mode === 'demo' ? SCENES.find(scene => scene.id === s.scene)?.label : MODES.find(m => m.key === s.mode)?.label} · {s.mask}</small>
                     </span>
                   </button>
                   <button className="surface-visibility"
@@ -427,7 +448,25 @@ export default function App() {
               <input type="file" accept="image/*,video/*" onChange={e=>setSource(e,false)} />
             </label>
             <div className="media-filename">{project.mediaName || 'No media loaded · Procedural content available'}</div>
-            <small className="help-text">R2 media is shared among surfaces set to My media. Source files are local and must be reattached after reload.</small>
+            <small className="help-text">R3 media is shared among surfaces set to My media. Source files are local and must be reattached after reload.</small>
+            {active.mode === 'demo' && (
+              <div className="scene-controls">
+                <label className="field-label" htmlFor="procedural-scene">Procedural scene</label>
+                <select id="procedural-scene" value={active.scene}
+                  onChange={e => patchActive({scene:e.target.value as Surface['scene']})}>
+                  {SCENES.map(scene => <option key={scene.id} value={scene.id}>
+                    {scene.label} · {scene.description}</option>)}
+                </select>
+                <div className="slider-label"><span>Animation speed</span>
+                  <strong>{active.speed.toFixed(1)}×</strong></div>
+                <input aria-label="Animation speed" type="range" min="0" max="3" step="0.1"
+                  value={active.speed} onChange={e=>patchActive({speed:Number(e.target.value)})} />
+                <div className="slider-label"><span>Audio response</span>
+                  <strong>{Math.round(active.reactivity*100)}%</strong></div>
+                <input aria-label="Audio reactivity" type="range" min="0" max="2" step="0.1"
+                  value={active.reactivity} onChange={e=>patchActive({reactivity:Number(e.target.value)})} />
+              </div>
+            )}
             <div className="field-label surface-setting">Mask shape</div>
             <select value={active.mask} onChange={e => patchActive({mask:e.target.value === 'ellipse' ? 'ellipse':'quad'})}>
               <option value="quad">Full four-corner surface</option>
@@ -443,8 +482,32 @@ export default function App() {
               onChange={e => patchActive({opacity:Number(e.target.value)/100})} />
           </section>
 
+          <section className="panel" aria-label="Live audio input">
+            <div className="panel-title"><span className="step">04</span> LIVE AUDIO PULSE</div>
+            <p className="help-text">Microphone processing stays in your browser. No sound or recordings are uploaded.
+              Mic access is optional, and only the pulse level is sent to the projector window.</p>
+            <div className="pulse-meter" role="meter" aria-label="Input pulse level"
+              aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(audio.level*100)}>
+              <div className="pulse-meter-fill" style={{width:(audio.level*100)+'%'}} />
+            </div>
+            <div className="button-grid">
+              <button className="secondary-button" onClick={()=>{
+                void audio.enableMicrophone();
+                setStatus('Microphone permission requested in this browser.');
+              }} disabled={audio.mode === 'microphone'}>
+                {audio.mode === 'microphone' ? '● Mic on' : '◉ Enable mic'}
+              </button>
+              <button className="secondary-button" onClick={()=>{
+                audio.tapPulse();
+                setStatus('Manual pulse triggered.');
+              }}>↗ Tap pulse</button>
+            </div>
+            <button className="text-button" disabled={audio.mode === 'off'}
+              onClick={() => { audio.stop(); setStatus('Audio input stopped.'); }}>Stop audio input</button>
+            {audio.error && <p className="audio-error" role="alert">{audio.error}</p>}
+          </section>
           <section className="panel">
-            <div className="panel-title"><span className="step">04</span> ALIGNMENT</div>
+            <div className="panel-title"><span className="step">05</span> ALIGNMENT</div>
             <label className="secondary-button file-button upload">▧ Load reference photo
               <input type="file" accept="image/*" onChange={e=>setSource(e,true)} />
             </label>
@@ -464,7 +527,7 @@ export default function App() {
           </section>
 
           <section className="panel">
-            <div className="panel-title"><span className="step">05</span> PROJECTOR</div>
+            <div className="panel-title"><span className="step">06</span> PROJECTOR</div>
             <label className="field-label" htmlFor="resolution">Output aspect preset</label>
             <select id="resolution" value={project.width+'x'+project.height} onChange={e=>{
               const p=PRESETS.find(x=>x.width+'x'+x.height===e.target.value);
@@ -485,9 +548,28 @@ export default function App() {
         <main className="main-content">
           <div className="content-heading">
             <div><div className="eyebrow">LIVE WORKSPACE / {project.surfaces.length} SURFACE(S)</div>
-              <h2>Surface Composer <span>↗</span></h2>
-              <p>Each shape is a perspective-correct layer. Selected corners are editable.</p></div>
+              <h2>Living Geometry <span>↗</span></h2>
+              <p>Build spatial scenes, perform cues, and synchronize visuals to live sound.</p></div>
             <button className="primary-button" onClick={openOutput}>◉ Open Projector Output ↗</button>
+          </div>
+          <div className="cue-deck">
+            <div className="cue-title"><span>LIVE CUE DECK</span>
+              <small>Scene changes preserve surface alignment and calibration.</small></div>
+            <div className="cue-actions">
+              {CUES.map(cue => (
+                <button type="button" className="cue-button" key={cue.id}
+                  onClick={() => {
+                    apply(cueScene(projectRef.current, cue.id));
+                    setStatus(cue.label+' cue applied to procedural surfaces.');
+                  }}>{cue.label}</button>
+              ))}
+              <button type="button" className={`blackout-button ${blackout ? 'engaged' : ''}`}
+                aria-pressed={blackout}
+                onClick={() => {
+                  setBlackout(value => !value);
+                  setStatus(blackout ? 'Projection restored.' : 'Projector blackout engaged.');
+                }}>{blackout ? '◉ RESTORE LIGHT' : '● BLACKOUT'}</button>
+            </div>
           </div>
           <div className="stage-shell">
             <div className="stage-topline"><span><i className="live-dot"/> REAL-TIME MULTI-SURFACE</span>
@@ -496,7 +578,8 @@ export default function App() {
               <div className="stage" ref={stageRef}
                 style={{aspectRatio:project.width+' / '+project.height}}>
                 <WarpCanvas surfaces={project.surfaces} mediaUrl={mediaUrl}
-                  mediaKind={mediaKind} muted={project.muted} />
+                  mediaKind={mediaKind} muted={project.muted}
+                  audioLevel={audio.level} blackout={blackout} />
                 {referenceUrl && showReference && <img className="reference-image"
                   src={referenceUrl} alt="Physical target photo alignment reference" />}
                 <svg className="warp-guide" viewBox="0 0 1000 562.5"
@@ -528,14 +611,14 @@ export default function App() {
                     }}
                     onKeyDown={event=>onHandleKey(event,i)}>{i+1}</button>
                 ))}
-                <span className="stage-watermark">ΦMAPPER369 / SURFACE COMPOSER R2</span>
+                <span className="stage-watermark">ΦMAPPER369 / LIVING GEOMETRY R3</span>
               </div>
             </div>
             <div className="stage-footer">
-              <span>◈ {project.surfaces.length} INDEPENDENT WARP LAYER(S)</span>
+              <span>◈ {project.surfaces.length} INDEPENDENT WARP LAYER(S) · {SCENES.length} GENERATIVE SCENES</span>
               <span>LOCAL-FIRST · WEBGL</span></div>
           </div>
-          <div className="status-bar" role="status"><span className="status-symbol">●</span>{status}</div>
+          <div className="status-bar" role="status"><span className="status-symbol">●</span>{status}<span className="audio-readout">PULSE {Math.round(audio.level * 100)}%</span></div>
           <div className="instructions">
             <div><span className="instruction-number">01</span><strong>Create surfaces</strong>
               <p>Add a surface or load the Dual/Triple Gallery layout.</p></div>

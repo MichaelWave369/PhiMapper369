@@ -234,3 +234,31 @@ footer { margin: 38px 0 10px; color: #526b7e; font-size: 9px;
 .danger { color: #ec9b9b; }
 .inactive-guide { stroke: #c6a4fb !important; stroke-width: 1 !important;
   stroke-dasharray: 3 6 !important; opacity: .75; filter: none !important; }
+
+/* R3 · Living Geometry */
+.scene-controls { margin: 14px 0 2px; padding: 14px 11px; background: #102b38;
+  border: 1px solid #2a5867; border-radius: 10px; }
+.scene-controls .slider-label { margin-top: 13px; }
+.pulse-meter { height: 12px; width: 100%; border-radius: 8px; overflow: hidden;
+  margin: 14px 0 10px; border: 1px solid #2b5260; background: #061824; }
+.pulse-meter-fill { height: 100%; background: linear-gradient(90deg,#2b99b8,#68e4cb,#f9d38b);
+  transition: width 65ms linear; }
+.audio-error { margin-top: 10px; color: #ffd3ab; font-size: 11px; line-height: 1.5; }
+.cue-deck { display: flex; gap: 18px; align-items: center; justify-content: space-between;
+  border: 1px solid #2c4f65; background: linear-gradient(90deg,#0c2634,#101d34);
+  border-radius: 13px; padding: 17px; margin-bottom: 18px; }
+.cue-title { display: flex; flex-direction: column; gap: 6px; min-width: 130px; }
+.cue-title span { font-size: 11px; font-weight: 850; letter-spacing: 1.3px; color: #89e4ef; }
+.cue-title small { font-size: 10px; line-height: 1.4; color: #8da7bc; }
+.cue-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+.cue-button { padding: 10px 11px; border: 1px solid #3c6175; border-radius: 8px;
+  background: #15364b; color: #c4e6f0; font-size: 11px; font-weight: 760; }
+.cue-button:hover { background: #226078; }
+.blackout-button { padding: 10px 12px; font-weight: 860; font-size: 11px; border-radius: 8px;
+  color: #ffd9d5; background: #3c1c23; border: 1px solid #a15258; }
+.blackout-button:hover, .blackout-button.engaged { background: #842f39; border-color: #f58d8d; }
+.audio-readout { float: right; margin-left: 14px; color: #8bdfed; font-variant-numeric: tabular-nums; }
+@media (max-width: 1200px) {
+  .cue-deck { flex-direction: column; align-items: stretch; }
+  .cue-actions { justify-content: flex-start; }
+}

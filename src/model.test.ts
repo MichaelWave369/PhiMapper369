@@ -1,6 +1,6 @@
 import { expect, describe, it } from 'vitest';
-import { defaultProject, parseProject, MAX_SURFACES, patchSurface, reorderSurface, newSurface } from './model';
-describe('R2 project format', () => {
+import { defaultProject, parseProject, MAX_SURFACES, patchSurface, reorderSurface, newSurface, cueScene, SCENES } from './model';
+describe('R3 project format', () => {
   it('round trips project JSON', () => {
     const p = defaultProject();
     expect(parseProject(JSON.parse(JSON.stringify(p)) as unknown)).toEqual(p);
@@ -13,7 +13,7 @@ describe('R2 project format', () => {
       mediaName: 'demo.mp4',
     };
     const upgraded = parseProject(legacy);
-    expect(upgraded.version).toBe(2);
+    expect(upgraded.version).toBe(3);
     expect(upgraded.surfaces[0].mode).toBe('checker');
     expect(upgraded.surfaces[0].opacity).toBeCloseTo(0.42);
     expect(upgraded.surfaces[0].corners).toEqual(legacy.corners);
@@ -38,4 +38,47 @@ describe('R2 project format', () => {
     expect(reordered.surfaces[0].id).toBe(b.id);
     expect(reordered.surfaces[1].id).toBe(a.surfaces[0].id);
   });
+});
+
+it('upgrades R2 surfaces to four-scene R3 defaults without moving corners', () => {
+  const p = defaultProject();
+  const legacy = {
+    ...p, version: 2, surfaces: p.surfaces.map(s => {
+      const { scene: _scene, speed: _speed, reactivity: _reactivity, ...old } = s;
+      void _scene; void _speed; void _reactivity;
+      return old;
+    }),
+  };
+  const upgraded = parseProject(legacy);
+  expect(upgraded.version).toBe(3);
+  expect(upgraded.surfaces[0].scene).toBe('gears');
+  expect(upgraded.surfaces[0].speed).toBe(1);
+  expect(upgraded.surfaces[0].reactivity).toBe(1);
+  expect(upgraded.surfaces[0].corners).toEqual(p.surfaces[0].corners);
+});
+
+it('preserves R3 scenes across export/import and constrains extreme speed', () => {
+  const p = defaultProject();
+  p.surfaces[0].scene = 'tunnel';
+  p.surfaces[0].speed = 2.3;
+  p.surfaces[0].reactivity = 1.5;
+  expect(parseProject(JSON.parse(JSON.stringify(p)) as unknown)).toEqual(p);
+  const out = parseProject({ ...p, surfaces: [{ ...p.surfaces[0],
+    scene: 'invalid', speed: Infinity, reactivity: 55 }] });
+  expect(out.surfaces[0].scene).toBe('gears');
+  expect(out.surfaces[0].speed).toBe(1);
+  expect(out.surfaces[0].reactivity).toBe(2);
+  expect(SCENES.length).toBe(4);
+});
+
+it('applies a cue only to procedural surfaces without touching geometry or media', () => {
+  const p = defaultProject();
+  const media = newSurface(2, 'media');
+  media.scene = 'bubbles';
+  p.surfaces.push(media);
+  const cued = cueScene(p, 'portal');
+  expect(cued.surfaces[0].scene).toBe('tunnel');
+  expect(cued.surfaces[1].scene).toBe('bubbles');
+  expect(cued.surfaces[0].corners).toEqual(p.surfaces[0].corners);
+  expect(cued.surfaces[1].corners).toEqual(media.corners);
 });

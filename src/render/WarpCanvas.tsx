@@ -7,6 +7,8 @@ type Props = {
   mediaUrl: string | null;
   mediaKind: MediaKind;
   muted: boolean;
+  audioLevel: number;
+  blackout: boolean;
   className?: string;
   playbackKey?: number;
 };
@@ -21,11 +23,15 @@ uniform mat3 uInverse${i};
 uniform int uMode${i};
 uniform float uOpacity${i};
 uniform int uMask${i};
-uniform float uFeather${i};`).join('\n');
+uniform float uFeather${i};
+uniform int uScene${i};
+uniform float uSpeed${i};
+uniform float uReactivity${i};`).join('\n');
 const renderLayers = Array.from({ length: MAX_SURFACES }, (_, i) => `
 if (uCount > ${i}) {
   vec4 next${i} = sampleLayer(dest, uInverse${i}, uMode${i},
-    uOpacity${i}, uMask${i}, uFeather${i});
+    uOpacity${i}, uMask${i}, uFeather${i},
+    uScene${i}, uSpeed${i}, uReactivity${i});
   color = mix(color, next${i}.rgb, next${i}.a);
 }`).join('\n');
 const FRAGMENT = `
@@ -33,25 +39,78 @@ precision highp float;
 uniform vec2 uResolution;
 uniform float uTime;
 uniform int uCount;
+uniform float uPulse;
+uniform float uBlackout;
 uniform sampler2D uMedia;
 ${shaderUniforms}
 float gridline(float x, float n, float thickness) {
   return 1.0 - smoothstep(0.0, thickness, abs(fract(x * n) - 0.5));
 }
-vec3 demo(vec2 uv) {
+vec3 demo(vec2 uv, float t, float pulse) {
   vec2 p = (uv - 0.5) * vec2(1.7777778, 1.0);
   float a = atan(p.y, p.x);
   float r = length(p);
-  float spin = a * 12.0 + sin(r * 17.0 - uTime * 0.9);
-  float rings = pow(0.5 + 0.5 * sin(r * 64.0 - uTime * 3.2), 9.0);
-  float teeth = pow(0.5 + 0.5 * cos(spin + uTime * 0.7), 15.0);
-  float bubbles = pow(0.5 + 0.5 * sin(r * 39.0 + cos(a * 9.0 + uTime) * 2.0), 12.0);
+  float spin = a * 12.0 + sin(r * 17.0 - t * 0.9);
+  float rings = pow(0.5 + 0.5 * sin(r * 64.0 - t * 3.2), 9.0);
+  float teeth = pow(0.5 + 0.5 * cos(spin + t * 0.7), 15.0);
+  float bubbles = pow(0.5 + 0.5 * sin(r * 39.0 + cos(a * 9.0 + t) * 2.0), 12.0);
   vec3 cyan = vec3(0.08, 0.83, 1.0);
-  return vec3(0.01, 0.035, 0.085) + cyan * rings * 0.75
+  return (vec3(0.01, 0.035, 0.085) + cyan * rings * 0.75
     + vec3(0.55, 0.27, 1.0) * teeth * rings
     + vec3(1.0, 0.65, 0.21) * bubbles * 0.22
     + cyan * (0.12 / (r + 0.06)) * 0.14
-    + cyan * 0.12 * pow(0.5 + 0.5 * cos(a * 6.0 + uTime), 24.0);
+    + cyan * 0.12 * pow(0.5 + 0.5 * cos(a * 6.0 + t), 24.0)) * (1.0 + pulse * 0.5);
+}
+
+vec3 tunnelScene(vec2 uv, float t, float pulse) {
+  vec2 p = (uv - 0.5) * vec2(1.7778, 1.0);
+  float r = max(length(p), 0.012);
+  float a = atan(p.y, p.x);
+  float z = 1.0 / (r + 0.09) + t * (0.65 + pulse * 1.7);
+  float ring = pow(0.5 + 0.5 * sin(z * 13.0), 11.0);
+  float spokes = pow(0.5 + 0.5 * sin(a * 15.0 + z * 0.9), 10.0);
+  vec3 c = vec3(0.005, 0.008, 0.028) +
+    vec3(0.05, 0.9, 1.0) * ring * 0.9 +
+    vec3(0.75, 0.27, 1.0) * spokes * 0.38 +
+    vec3(1.0, 0.34, 0.12) * ring * spokes * 0.55;
+  return c * (1.0 + pulse * 0.55);
+}
+vec3 bubbleScene(vec2 uv, float t, float pulse) {
+  vec3 color = vec3(0.008, 0.018, 0.07);
+  for (int k = 0; k < 9; k++) {
+    float n = float(k);
+    float x = fract(n * 0.618034 + 0.22 * sin(t * 0.13 + n * 2.7));
+    float y = fract(n * 0.414214 - t * (0.024 + 0.006 * n));
+    vec2 p = (uv - vec2(x,y)) * vec2(1.55, 1.0);
+    float r = length(p);
+    float size = 0.12 + 0.032 * sin(n * 4.3 + t * 0.17);
+    float rim = exp(-abs(r - size) * 92.0);
+    float glow = exp(-r * 13.0);
+    vec3 pigment = 0.5 + 0.5 * cos(vec3(0.0, 2.2, 4.2) + n * 1.5 + t * 0.16);
+    color += pigment * (rim * 0.62 + glow * 0.035) * (1.0 + pulse * 0.45);
+  }
+  return color;
+}
+vec3 latticeScene(vec2 uv, float t, float pulse) {
+  vec2 p = (uv - 0.5) * vec2(1.8, 1.0);
+  float a = t * 0.22;
+  vec2 rot = vec2(p.x * cos(a) - p.y * sin(a), p.x * sin(a) + p.y * cos(a));
+  float swell = 1.0 + pulse * 0.45;
+  vec2 v = rot * (12.0 * swell);
+  float gx = exp(-abs(sin(v.x + sin(v.y * 0.33 + t) * 0.35)) * 24.0);
+  float gy = exp(-abs(sin(v.y + cos(v.x * 0.35 - t) * 0.35)) * 24.0);
+  float nodes = pow(max(gx * gy, 0.0), 0.65);
+  float wave = 0.4 + 0.6 * sin(length(p) * 12.0 - t * 2.2);
+  return vec3(0.008, 0.027, 0.06)
+    + vec3(0.08, 0.82, 1.0) * gx * wave * 0.45
+    + vec3(0.75, 0.19, 1.0) * gy * (1.0 - 0.45 * wave)
+    + vec3(1.0, 0.78, 0.26) * nodes * (0.25 + pulse * 0.45);
+}
+vec3 procedural(vec2 uv, int scene, float t, float pulse) {
+  if (scene == 1) return tunnelScene(uv, t, pulse);
+  if (scene == 2) return bubbleScene(uv, t, pulse);
+  if (scene == 3) return latticeScene(uv, t, pulse);
+  return demo(uv, t, pulse);
 }
 vec3 calibration(vec2 uv) {
   float edge = float(uv.x < 0.006 || uv.x > 0.994 || uv.y < 0.006 || uv.y > 0.994);
@@ -71,7 +130,8 @@ vec3 checker(vec2 uv) {
   return mix(vec3(0.045, 0.08, 0.17), vec3(0.59, 0.85, 0.94), c)
     + vec3(0.23, 0.7, 1.0) * mark * 0.25;
 }
-vec4 sampleLayer(vec2 dest, mat3 inverseH, int mode, float opacity, int mask, float feather) {
+vec4 sampleLayer(vec2 dest, mat3 inverseH, int mode, float opacity, int mask, float feather,
+  int scene, float speed, float reactivity) {
   if (opacity <= 0.001) return vec4(0.0);
   vec3 mapped = inverseH * vec3(dest, 1.0);
   if (abs(mapped.z) < 0.000001) return vec4(0.0);
@@ -91,11 +151,15 @@ vec4 sampleLayer(vec2 dest, mat3 inverseH, int mode, float opacity, int mask, fl
   if (mode == 3) c = texture2D(uMedia, uv).rgb;
   else if (mode == 1) c = calibration(uv);
   else if (mode == 2) c = checker(uv);
-  else c = demo(uv);
+  else c = procedural(uv, scene, uTime * speed, clamp(uPulse * reactivity, 0.0, 1.0));
   return vec4(clamp(c, 0.0, 1.0), alpha);
 }
 void main() {
   vec2 dest = vec2(gl_FragCoord.x / uResolution.x, 1.0 - gl_FragCoord.y / uResolution.y);
+  if (uBlackout > 0.5) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
   vec3 color = vec3(0.0);
   ${renderLayers}
   gl_FragColor = vec4(color, 1.0);
@@ -121,17 +185,21 @@ type SurfaceUniforms = {
   opacity: WebGLUniformLocation | null;
   mask: WebGLUniformLocation | null;
   feather: WebGLUniformLocation | null;
+  scene: WebGLUniformLocation | null;
+  speed: WebGLUniformLocation | null;
+  reactivity: WebGLUniformLocation | null;
 };
 
 export default function WarpCanvas({
-  surfaces, mediaUrl, mediaKind, muted, className,
+  surfaces, mediaUrl, mediaKind, muted, audioLevel, blackout, className,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const propsRef = useRef({ surfaces, muted });
+  const propsRef = useRef({ surfaces, muted, audioLevel, blackout });
   const lastInverseRef = useRef<Map<string, Float32Array>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { propsRef.current = { surfaces, muted }; }, [surfaces, muted]);
+  useEffect(() => { propsRef.current = { surfaces, muted, audioLevel, blackout }; },
+    [surfaces, muted, audioLevel, blackout]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -204,17 +272,20 @@ export default function WarpCanvas({
 
       const uniform = (name: string) => gl.getUniformLocation(program!, name);
       const res = uniform('uResolution'), time = uniform('uTime'), count = uniform('uCount');
+      const pulseUniform = uniform('uPulse'), blackoutUniform = uniform('uBlackout');
       const layerUniforms: SurfaceUniforms[] = Array.from({ length: MAX_SURFACES }, (_, i) => ({
         inverse: uniform('uInverse' + i), mode: uniform('uMode' + i),
         opacity: uniform('uOpacity' + i), mask: uniform('uMask' + i),
         feather: uniform('uFeather' + i),
+        scene: uniform('uScene' + i), speed: uniform('uSpeed' + i),
+        reactivity: uniform('uReactivity' + i),
       }));
       const started = performance.now();
       const identity = toGlMatrix([1,0,0, 0,1,0, 0,0,1]);
 
       const draw = () => {
         if (disposed) return;
-        const { surfaces: current, muted: isMuted } = propsRef.current;
+        const { surfaces: current, muted: isMuted, audioLevel: pulse, blackout: black } = propsRef.current;
         const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
         const w = Math.max(1, Math.round(canvas.clientWidth * dpr));
         const h = Math.max(1, Math.round(canvas.clientHeight * dpr));
@@ -238,6 +309,8 @@ export default function WarpCanvas({
         gl.uniform1i(count, layers.length);
         gl.uniform2f(res, w, h);
         gl.uniform1f(time, (performance.now() - started) / 1000);
+        gl.uniform1f(pulseUniform, Math.min(Math.max(pulse, 0), 1));
+        gl.uniform1f(blackoutUniform, black ? 1 : 0);
         layers.forEach((layer, i) => {
           const u = layerUniforms[i];
           let inverse = lastInverseRef.current.get(layer.id) || identity;
@@ -253,6 +326,10 @@ export default function WarpCanvas({
           gl.uniform1f(u.opacity, layer.opacity);
           gl.uniform1i(u.mask, layer.mask === 'ellipse' ? 1 : 0);
           gl.uniform1f(u.feather, layer.feather);
+          gl.uniform1i(u.scene, layer.scene === 'tunnel' ? 1 : layer.scene === 'bubbles' ? 2 :
+            layer.scene === 'lattice' ? 3 : 0);
+          gl.uniform1f(u.speed, layer.speed);
+          gl.uniform1f(u.reactivity, layer.reactivity);
         });
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         frame = requestAnimationFrame(draw);
