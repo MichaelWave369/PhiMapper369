@@ -12,10 +12,23 @@ const tokens = {
   controller: 'controller-long-test-key-002',
   display: 'display-super-long-test-key-003',
 };
+const inboxes = new WeakMap();
+function attachInbox(ws) {
+  const inbox = { queued: [], waiting: [] };
+  inboxes.set(ws, inbox);
+  ws.on('message', data => {
+    const msg = JSON.parse(data.toString());
+    if (inbox.waiting.length) inbox.waiting.shift()(msg);
+    else inbox.queued.push(msg);
+  });
+}
 function receive(ws) {
+  const inbox = inboxes.get(ws);
+  if (!inbox) throw new Error('No message inbox');
+  if (inbox.queued.length) return Promise.resolve(inbox.queued.shift());
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Timed out waiting for relay message')), 1800);
-    ws.once('message', data => { clearTimeout(timeout); resolve(JSON.parse(data.toString())); });
+    inbox.waiting.push(msg => { clearTimeout(timeout); resolve(msg); });
   });
 }
 const send = (ws, payload) => ws.send(JSON.stringify(payload));
@@ -23,6 +36,7 @@ async function connect(port, role, token, room = 'table-1') {
   const ws = new WebSocket('ws://127.0.0.1:' + port + '/stage', {
     origin: 'http://127.0.0.1:' + port,
   });
+  attachInbox(ws);
   await once(ws, 'open');
   const welcome = receive(ws);
   send(ws, { type: 'join', room, role, token });
