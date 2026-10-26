@@ -1,6 +1,12 @@
-# ΦMapper369 · R3 Living Geometry
+# ΦMapper369 · R4 PhiStage Bridge
 
-> Turn any surface into a living canvas.
+> Turn any surface into a living canvas and drive it from a modular tabletop.
+
+## R4 PhiStage Bridge
+
+The R4 prototype adds a touch-friendly **PhiTable demo** and versioned local scene/focus messages. Open the editor and projector output, then click **Open PhiTable Demo**. Touch positions project through the same calibrated perspective warp used by the WebGL engine; scene cue buttons update procedural scenes.
+
+**Scope:** Same-origin tabs in one browser profile only. This release is not yet cross-device, multi-player, or XR headset synchronization. See [the R4 guide](docs/PHISTAGE-R4.md) for tests, the protocol, and roadmap.
 
 **PhiMapper369** is a local-first MIT-licensed browser projection-mapping studio. **R3: Living Geometry** expands the R2 Surface Composer with multiple original generative shader scenes, audio-reactive projection, a live cue deck and an emergency blackout toggle.
 
