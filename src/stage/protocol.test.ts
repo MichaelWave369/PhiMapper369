@@ -30,9 +30,10 @@ describe('PhiStage v1', () => {
   });
   it('maps surface-local coordinates with the existing projective warp', () => {
     const s = defaultProject().surfaces[0];
-    expect(mapFocusToProjector({ x: 0, y: 0 }, s)?.x).toBeCloseTo(.12);
-    expect(mapFocusToProjector({ x: 0, y: 0 }, s)?.y).toBeCloseTo(.14);
-    expect(mapFocusToProjector({ x: .5, y: .5 }, s)?.x).toBeCloseTo(.5);
+    expect(mapFocusToProjector({ x: 0, y: 0 }, s)?.x).toBeCloseTo(s.corners[0].x);
+    expect(mapFocusToProjector({ x: 0, y: 0 }, s)?.y).toBeCloseTo(s.corners[0].y);
+    expect(mapFocusToProjector({ x: .5, y: .5 }, s)?.x)
+      .toBeCloseTo((s.corners[0].x + s.corners[2].x) / 2);
   });
   it('handles invalid points or degenerate calibration', () => {
     const s = defaultProject().surfaces[0];
