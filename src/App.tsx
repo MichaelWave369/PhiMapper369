@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent, PointerEvent } from 'react';
 import WarpCanvas from './render/WarpCanvas';
+import StageLayer from './stage/StageLayer';
+import { createStageBridge } from './stage/protocol';
 import { useLivePulse } from './audio/useLivePulse';
 import type { Corners, MediaKind, Point, Project, Surface, VisualMode } from './model';
 import {
@@ -180,6 +182,16 @@ export default function App() {
     return () => { channel.close(); channelRef.current = null; };
   }, []);
 
+  useEffect(() => {
+    if (PROJECTOR || typeof BroadcastChannel === 'undefined') return;
+    const stage = createStageBridge(packet => {
+      if (packet.payload.kind !== 'cue') return;
+      apply(cueScene(projectRef.current, packet.payload.cue));
+      setStatus('PhiStage scene cue: ' + packet.payload.cue);
+    });
+    return () => stage.close();
+  }, []);
+
   useEffect(() => () => {
     if (mediaOwnedRef.current) URL.revokeObjectURL(mediaOwnedRef.current);
     if (referenceOwnedRef.current) URL.revokeObjectURL(referenceOwnedRef.current);
@@ -297,6 +309,18 @@ export default function App() {
       setStatus(err instanceof Error ? err.message : 'Unable to read project file.');
     }
   }
+  function openTable() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('projector');
+    url.searchParams.set('table', '1');
+    const win = window.open(url.toString(), 'PhiStageTable', 'popup=yes,width=1100,height=760');
+    if (!win) {
+      setStatus('Popup blocked. Allow popups to open the PhiTable demo.');
+      return;
+    }
+    win.focus();
+    setStatus('PhiTable demo opened. Touch the field to move the projected marker.');
+  }
   function openOutput() {
     const url = new URL(window.location.href);
     url.searchParams.set('projector','1');
@@ -325,6 +349,7 @@ export default function App() {
       <WarpCanvas className="projector-canvas" surfaces={project.surfaces}
         mediaUrl={mediaUrl} mediaKind={mediaKind} muted={true}
         audioLevel={projectorAudio} blackout={blackout} />
+      <StageLayer surfaces={project.surfaces} blackout={blackout} />
       <div className="projector-toolbar">
         <span>ΦMapper · {project.surfaces.length} surfaces · {project.width} × {project.height}</span>
         <button onClick={() => {
@@ -350,7 +375,7 @@ export default function App() {
           <div><strong>PhiMapper<span>369</span></strong><small>SPATIAL PROJECTION STUDIO</small></div>
         </div>
         <div className="header-right">
-          <span className="release">R3 · LIVING GEOMETRY</span>
+          <span className="release">R4 · PHISTAGE BRIDGE</span>
           <a className="header-link" href="https://github.com/MichaelWave369/PhiMapper369"
             target="_blank" rel="noreferrer">GitHub ↗</a>
         </div>
@@ -358,7 +383,7 @@ export default function App() {
       <div className="workspace">
         <aside className="sidebar" aria-label="Mapping controls">
           <div className="sidebar-heading">
-            <div className="eyebrow">PHIMAPPER / R3</div>
+            <div className="eyebrow">PHIMAPPER / R4</div>
             <h1>Living Geometry</h1>
             <p>Map, animate, and perform with spatial light.</p>
           </div>
@@ -552,6 +577,12 @@ export default function App() {
               <p>Build spatial scenes, perform cues, and synchronize visuals to live sound.</p></div>
             <button className="primary-button" onClick={openOutput}>◉ Open Projector Output ↗</button>
           </div>
+          <div className="stage-bridge-bar">
+            <div><strong>ΦSTAGE BRIDGE · LOCAL PROTOTYPE</strong>
+              <p>Touch a simulated table to drive the calibrated projector marker.
+                Scene cues sync too. Same-browser tabs; LAN and XR are not connected yet.</p></div>
+            <button className="primary-button" onClick={openTable}>◈ Open PhiTable Demo ↗</button>
+          </div>
           <div className="cue-deck">
             <div className="cue-title"><span>LIVE CUE DECK</span>
               <small>Scene changes preserve surface alignment and calibration.</small></div>
@@ -580,6 +611,7 @@ export default function App() {
                 <WarpCanvas surfaces={project.surfaces} mediaUrl={mediaUrl}
                   mediaKind={mediaKind} muted={project.muted}
                   audioLevel={audio.level} blackout={blackout} />
+                <StageLayer surfaces={project.surfaces} blackout={blackout} />
                 {referenceUrl && showReference && <img className="reference-image"
                   src={referenceUrl} alt="Physical target photo alignment reference" />}
                 <svg className="warp-guide" viewBox="0 0 1000 562.5"
@@ -611,7 +643,7 @@ export default function App() {
                     }}
                     onKeyDown={event=>onHandleKey(event,i)}>{i+1}</button>
                 ))}
-                <span className="stage-watermark">ΦMAPPER369 / LIVING GEOMETRY R3</span>
+                <span className="stage-watermark">ΦMAPPER369 / PHISTAGE R4</span>
               </div>
             </div>
             <div className="stage-footer">
