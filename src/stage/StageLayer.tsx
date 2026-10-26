@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Surface } from '../model';
 import { createStageBridge, mapFocusToProjector } from './protocol';
+import { onLanEvent } from './lan';
 import type { StagePayload } from './protocol';
 
 type Focus = Extract<StagePayload, { kind: 'focus' }>;
@@ -10,11 +11,14 @@ type Props = { surfaces: Surface[]; blackout: boolean };
 export default function StageLayer({ surfaces, blackout }: Props) {
   const [focus, setFocus] = useState<Focus | null>(null);
   useEffect(() => {
-    if (typeof BroadcastChannel === 'undefined') return;
-    const bus = createStageBridge(packet => {
+    const remote = onLanEvent(packet => {
       if (packet.payload.kind === 'focus') setFocus(packet.payload);
     });
-    return () => bus.close();
+    const bus = typeof BroadcastChannel !== 'undefined'
+      ? createStageBridge(packet => {
+          if (packet.payload.kind === 'focus') setFocus(packet.payload);
+        }) : null;
+    return () => { bus?.close(); remote(); };
   }, []);
   if (!focus || blackout) return null;
   const surface = surfaces.find(s => s.id === focus.surfaceId && s.visible);
