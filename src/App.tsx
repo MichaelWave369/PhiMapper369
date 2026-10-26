@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent, PointerEvent } from 'react';
 import WarpCanvas from './render/WarpCanvas';
 import StageLayer from './stage/StageLayer';
+import LanPanel from './stage/LanPanel';
+import { onLanEvent, onLanStatus, publishLanSnapshot } from './stage/lan';
 import { createStageBridge } from './stage/protocol';
 import { useLivePulse } from './audio/useLivePulse';
 import type { Corners, MediaKind, Point, Project, Surface, VisualMode } from './model';
@@ -142,6 +144,7 @@ export default function App() {
       saveStoredProject(project);
       channelRef.current?.postMessage({ type:'SYNC', project, mediaUrl, mediaKind,
         blackout, audioLevel: audio.level } satisfies SyncMessage);
+      publishLanSnapshot(project, blackout, audio.level);
     }
   }, [project, mediaUrl, mediaKind, blackout]);
 
@@ -190,6 +193,22 @@ export default function App() {
       setStatus('PhiStage scene cue: ' + packet.payload.cue);
     });
     return () => stage.close();
+  }, []);
+
+  useEffect(() => {
+    if (PROJECTOR) return;
+    const removeEvent = onLanEvent(packet => {
+      if (packet.payload.kind !== 'cue') return;
+      apply(cueScene(projectRef.current, packet.payload.cue));
+      setStatus('LAN cue received: ' + packet.payload.cue);
+    });
+    const removeStatus = onLanStatus(s => {
+      if (s.connected && s.role === 'operator') {
+        publishLanSnapshot(snapshotRef.current.project,
+          snapshotRef.current.blackout, snapshotRef.current.audioLevel);
+      }
+    });
+    return () => { removeEvent(); removeStatus(); };
   }, []);
 
   useEffect(() => () => {
@@ -375,7 +394,7 @@ export default function App() {
           <div><strong>PhiMapper<span>369</span></strong><small>SPATIAL PROJECTION STUDIO</small></div>
         </div>
         <div className="header-right">
-          <span className="release">R4 · PHISTAGE BRIDGE</span>
+          <span className="release">R5 · PHICORE LAN</span>
           <a className="header-link" href="https://github.com/MichaelWave369/PhiMapper369"
             target="_blank" rel="noreferrer">GitHub ↗</a>
         </div>
@@ -383,7 +402,7 @@ export default function App() {
       <div className="workspace">
         <aside className="sidebar" aria-label="Mapping controls">
           <div className="sidebar-heading">
-            <div className="eyebrow">PHIMAPPER / R4</div>
+            <div className="eyebrow">PHIMAPPER / R5</div>
             <h1>Living Geometry</h1>
             <p>Map, animate, and perform with spatial light.</p>
           </div>
@@ -567,6 +586,7 @@ export default function App() {
               Mute video in editor</label>}
             <small className="help-text">Projector output is always muted. Presets set aspect ratio, not monitor hardware resolution.</small>
           </section>
+          <LanPanel role="operator" />
           <button className="reset-all" onClick={() => apply(defaultProject())}>Restore First Light defaults</button>
         </aside>
 
@@ -578,9 +598,9 @@ export default function App() {
             <button className="primary-button" onClick={openOutput}>◉ Open Projector Output ↗</button>
           </div>
           <div className="stage-bridge-bar">
-            <div><strong>ΦSTAGE BRIDGE · LOCAL PROTOTYPE</strong>
+            <div><strong>ΦSTAGE BRIDGE · NETWORK READY</strong>
               <p>Touch a simulated table to drive the calibrated projector marker.
-                Scene cues sync too. Same-browser tabs; LAN and XR are not connected yet.</p></div>
+                LAN clients can connect through the PhiCore relay; XR anchors remain future work.</p></div>
             <button className="primary-button" onClick={openTable}>◈ Open PhiTable Demo ↗</button>
           </div>
           <div className="cue-deck">
@@ -643,7 +663,7 @@ export default function App() {
                     }}
                     onKeyDown={event=>onHandleKey(event,i)}>{i+1}</button>
                 ))}
-                <span className="stage-watermark">ΦMAPPER369 / PHISTAGE R4</span>
+                <span className="stage-watermark">ΦMAPPER369 / PHISTAGE R5</span>
               </div>
             </div>
             <div className="stage-footer">
