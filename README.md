@@ -1,6 +1,12 @@
-# ΦMapper369 · R4 PhiStage Bridge
+# ΦMapper369 · R5 PhiCore LAN Relay
 
 > Turn any surface into a living canvas and drive it from a modular tabletop.
+
+## R5 PhiCore LAN Relay
+
+**New:** The table, editor, and projector can run on separate computers/Raspberry Pis on an opt-in trusted local network. Run `npm install && npm run build && npm run stage:serve` for localhost; use `PHISTAGE_HOST=0.0.0.0 npm run stage:serve` on an isolated LAN. Role-specific access keys are printed in the terminal. Use `?table=1` and `?display=1` on the locally served site. No remote XR anchors or game-world physics are included in R5.
+
+Read the [PhiStage R5 local-network guide](docs/PHISTAGE-R5-LAN.md) for security boundaries, joining and a detailed workflow.
 
 ## R4 PhiStage Bridge
 
