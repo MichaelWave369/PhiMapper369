@@ -32,7 +32,7 @@ export default function StageDisplay() {
         <div className="stage-display-heading">
           <strong>ΦSTAGE · REMOTE PROJECTOR</strong>
           <span>{synced ? 'Snapshot received' : 'Waiting for editor snapshot'}</span>
-          <button onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>
+          <button onClick={() => document.querySelector('.stage-display-root')?.requestFullscreen().catch(() => {})}>
             Fullscreen output</button>
         </div>
         <LanPanel role="display" />
