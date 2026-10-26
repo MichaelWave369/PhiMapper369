@@ -320,3 +320,37 @@ footer { margin: 38px 0 10px; color: #526b7e; font-size: 9px;
   .table-panel { padding:12px; }
   .table-touch { aspect-ratio:4/3; }
 }
+
+/* R5 · trusted-local-network PhiCore relay */
+.lan-panel { margin:16px 0; padding:15px; background:linear-gradient(120deg,#142a38,#101b2c);
+  border:1px solid #396777; border-radius:12px; color:#b6d3e1; }
+.lan-title { font-size:11px; font-weight:900; letter-spacing:1px; color:#7be3e8; }
+.lan-panel p { color:#9bb7c4; line-height:1.5; font-size:11px; }
+.lan-fields { display:grid; grid-template-columns: minmax(0,2fr) minmax(0,1fr);
+  gap:9px; }
+.lan-fields label { font-size:10px; display:flex; flex-direction:column;
+  gap:6px; min-width:0; font-weight:700; }
+.lan-fields label:last-child { grid-column:1/-1; }
+.lan-fields input { padding:10px; color:#dbf1f6; border:1px solid #426075;
+  background:#071927; border-radius:7px; font-size:12px; width:100%; min-width:0; }
+.lan-actions { display:flex; gap:9px; margin:12px 0; }
+.lan-actions button { background:#15516a; border:1px solid #458099; border-radius:8px;
+  color:#dbfaff; font-weight:800; padding:9px 12px; font-size:11px; }
+.lan-actions button:disabled { opacity:.4; cursor:default; }
+.lan-panel small { color:#ffe6a4; font-size:11px; display:block; }
+.lan-panel small.lan-ok { color:#8bf2bd; }
+.lan-panel .lan-warning { margin-bottom:0; color:#b8a9a2; }
+.stage-display-root { width:100vw; min-height:100vh; background:#000;
+  position:relative; overflow:hidden; }
+.stage-display-canvas { position:absolute; inset:0; z-index:0; overflow:hidden; }
+.stage-display-controls { position:relative; z-index:5; max-width:700px; margin:22px auto;
+  background:#071522e8; border-radius:12px; padding:17px; color:#f1f7ff; }
+.stage-display-heading { display:flex; flex-wrap:wrap; align-items:center; gap:15px; font-size:12px; }
+.stage-display-heading span { color:#a3c3cf; }
+.stage-display-heading button { background:#16526d; border:1px solid #37788e;
+  color:#e0fbff; border-radius:8px; padding:10px; cursor:pointer; }
+.stage-display-root:fullscreen .stage-display-controls { display:none; }
+@media (max-width:720px) { .lan-fields { grid-template-columns:1fr; }
+  .lan-fields label:last-child { grid-column:auto; }
+  .stage-display-controls { margin:8px; }
+}
