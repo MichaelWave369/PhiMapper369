@@ -3,6 +3,8 @@ import type { PointerEvent } from 'react';
 import { CUES, parseProject } from '../model';
 import type { Point, Project } from '../model';
 import { createStageBridge, EDITOR_CHANNEL } from './protocol';
+import LanPanel from './LanPanel';
+import { onLanSnapshot, publishLanEvent } from './lan';
 
 type EditorSync = { type: 'SYNC'; project: unknown };
 
@@ -34,6 +36,16 @@ export default function StageTable() {
     return () => { editor.close(); bus.close(); busRef.current = null; };
   }, []);
 
+  useEffect(() => onLanSnapshot(snapshot => {
+    try {
+      const parsed = parseProject(snapshot.project);
+      setProject(parsed);
+      setSurfaceId(current => parsed.surfaces.some(s => s.id === current)
+        ? current : parsed.selectedId);
+      setConnected(true);
+    } catch { /* Ignore malformed network snapshots. */ }
+  }), []);
+
   const chosen = project?.surfaces.find(s => s.id === surfaceId) ?? project?.surfaces[0];
   const targetId = chosen?.id ?? 'surface-1';
   function sendFocus(event: PointerEvent<HTMLDivElement>) {
@@ -45,11 +57,12 @@ export default function StageTable() {
     };
     setLast(point);
     busRef.current?.publish({ kind: 'focus', surfaceId: targetId, point });
+    publishLanEvent({ kind: 'focus', surfaceId: targetId, point });
   }
   return (
     <div className="table-root">
       <header className="table-header">
-        <div><strong>ΦTABLE / PHISTAGE</strong><small>R4 · Surface Input Lab</small></div>
+        <div><strong>ΦTABLE / PHISTAGE</strong><small>R5 · LAN Surface Input</small></div>
         <a className="table-link" href={window.location.pathname}>Back to Mapper</a>
       </header>
       <div className="table-panel">
@@ -90,17 +103,19 @@ export default function StageTable() {
         <div className="table-cues">
           <span>Send live scene cue</span>
           {CUES.map(cue => (
-            <button key={cue.id} onClick={() => busRef.current?.publish({
-              kind: 'cue', cue: cue.id,
-            })}>{cue.label}</button>
+            <button key={cue.id} onClick={() => {
+              busRef.current?.publish({ kind: 'cue', cue: cue.id });
+              publishLanEvent({ kind: 'cue', cue: cue.id });
+            }}>{cue.label}</button>
           ))}
         </div>
         <p className="table-notice" role="status">
           {connected ? 'Editor synchronized. Focus uses the selected surface warp.' :
             'Open the main PhiMapper editor in another tab, then its projector output.'}
-          {' '}R4 uses same-origin tabs in one browser profile. Separate devices,
-          LAN relay, and XR anchors are future integrations.
+          {' '}R5 additionally supports separate devices using the optional PhiCore LAN relay.
+          XR spatial anchors are not included yet.
         </p>
+        <LanPanel role="controller" />
       </div>
     </div>
   );

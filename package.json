@@ -7,11 +7,13 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run src && node --test server/*.test.mjs",
+    "stage:serve": "node server/phistage-server.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
